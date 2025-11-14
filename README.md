@@ -12,7 +12,6 @@ This README provides:
 * Postgres log core (batch writer)
 * Context fields
 * Integration examples
-
   * `net/http`
   * Echo
 * Best practices (PII, redaction, retention)
@@ -46,7 +45,6 @@ Most Go projects evolve into the same pattern:
 * You start with stdout logs using Zap or Zerolog.
 * Then you want logs searchable over time.
 * But you do **not** want:
-
   * Loki + Grafana
   * Elasticsearch + Kibana
   * Cloud Logging / Datadog / Sentry (pricing, compliance, vendor lock‑in)
