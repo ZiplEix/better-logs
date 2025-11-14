@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"maps"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -16,31 +16,65 @@ import (
 // ctxKey is the private key type used to store extra log fields in context.
 type ctxKey struct{}
 
-// FieldsFrom returns all custom log fields stored in the context, if any.
-func FieldsFrom(ctx context.Context) map[string]any {
+// fieldsHolder holds mutable log fields shared across middleware + handlers.
+type fieldsHolder struct {
+	mu sync.Mutex
+	m  map[string]any
+}
+
+// getHolder returns the fieldsHolder stored in the context, if any.
+func getHolder(ctx context.Context) *fieldsHolder {
 	if v := ctx.Value(ctxKey{}); v != nil {
-		if m, ok := v.(map[string]any); ok {
-			return m
+		if h, ok := v.(*fieldsHolder); ok {
+			return h
 		}
 	}
-	return map[string]any{}
+	return nil
+}
+
+// ensureHolder returns an existing fieldsHolder from ctx or creates a new one
+// and returns the (possibly) updated context.
+func ensureHolder(ctx context.Context) (*fieldsHolder, context.Context) {
+	if h := getHolder(ctx); h != nil {
+		return h, ctx
+	}
+	h := &fieldsHolder{m: make(map[string]any)}
+	ctx = context.WithValue(ctx, ctxKey{}, h)
+	return h, ctx
+}
+
+// FieldsFrom returns a COPY of all custom log fields stored in the context, if any.
+func FieldsFrom(ctx context.Context) map[string]any {
+	h := getHolder(ctx)
+	if h == nil {
+		return map[string]any{}
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	out := make(map[string]any, len(h.m))
+	for k, v := range h.m {
+		out[k] = v
+	}
+	return out
 }
 
 // WithFields merges the provided key/value pairs into the context's logging fields.
+// It returns the (possibly) updated context. The underlying holder is shared, so
+// even if the returned context is ignored, the fields are still added.
 func WithFields(ctx context.Context, kv map[string]any) context.Context {
-	existing := FieldsFrom(ctx)
-	if len(existing) == 0 {
-		// make a copy to avoid external map mutation surprises
-		cloned := make(map[string]any, len(kv))
-		maps.Copy(cloned, kv)
-		return context.WithValue(ctx, ctxKey{}, cloned)
+	h, ctx2 := ensureHolder(ctx)
+	if len(kv) == 0 {
+		return ctx2
 	}
 
-	// merge into a new map
-	merged := make(map[string]any, len(existing)+len(kv))
-	maps.Copy(merged, existing)
-	maps.Copy(merged, kv)
-	return context.WithValue(ctx, ctxKey{}, merged)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for k, v := range kv {
+		h.m[k] = v
+	}
+	return ctx2
 }
 
 // AddField adds a single field into the context's logging fields.
@@ -88,6 +122,11 @@ func WithConfig(cfg Config) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 
+			// Ensure a shared fields holder exists in the context BEFORE the handler runs,
+			// so handlers can call AddField/WithFields and enrich the final http_request log.
+			ctxWithHolder := WithFields(r.Context(), nil)
+			r = r.WithContext(ctxWithHolder)
+
 			// Optionally read and buffer the request body
 			var bodyStr string
 			if cfg.LogRequestBody && r.Body != nil {
@@ -109,7 +148,6 @@ func WithConfig(cfg Config) func(http.Handler) http.Handler {
 			next.ServeHTTP(rw, r)
 
 			lat := time.Since(start)
-
 			status := rw.status
 
 			// Collect base fields
