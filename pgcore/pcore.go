@@ -255,13 +255,27 @@ func (c *core) loop() {
 	for {
 		select {
 		case <-c.stop:
-			flush()
-			return
+			// Drain the channel before final flush to avoid losing logs.
+			for {
+				select {
+				case b := <-c.ch:
+					batch = append(batch, b)
+					if len(batch) >= c.batchSize {
+						flush()
+					}
+				default:
+					// Channel drained (or empty), do a final flush and exit.
+					flush()
+					return
+				}
+			}
+
 		case b := <-c.ch:
 			batch = append(batch, b)
 			if len(batch) >= c.batchSize {
 				flush()
 			}
+
 		case <-ticker.C:
 			flush()
 		}
