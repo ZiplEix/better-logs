@@ -133,13 +133,25 @@ func (c *core) Enabled(lvl zapcore.Level) bool {
 
 // With implements zapcore.Core.
 func (c *core) With(fields []zapcore.Field) zapcore.Core {
-	clone := *c
-	clone.enc = c.enc.Clone()
+	// Build a new core that shares the runtime resources (db, channels)
+	// but does NOT copy the internal WaitGroup or other sync state.
+	// Copying a WaitGroup leads to vet warnings and is unsafe.
+	clone := &core{
+		enc:       c.enc.Clone(),
+		level:     c.level,
+		db:        c.db,
+		ch:        c.ch,
+		stop:      c.stop,
+		batchSize: c.batchSize,
+		maxWait:   c.maxWait,
+		reqKeys:   c.reqKeys,
+	}
 
 	for _, f := range fields {
 		f.AddTo(clone.enc)
 	}
-	return &clone
+
+	return clone
 }
 
 // Check implements zapcore.Core.

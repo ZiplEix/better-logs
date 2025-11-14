@@ -110,8 +110,6 @@ func TestMiddleware_LogsInfoOn200_WithContextFieldsAndRequestID(t *testing.T) {
 	defer zap.ReplaceGlobals(zap.NewNop())
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := AddField(r.Context(), "user_id", "user-123")
-		r = r.WithContext(ctx)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -119,6 +117,7 @@ func TestMiddleware_LogsInfoOn200_WithContextFieldsAndRequestID(t *testing.T) {
 	handler := Middleware(next)
 
 	req := httptest.NewRequest(http.MethodGet, "/test/path?foo=bar", nil)
+	req = req.WithContext(AddField(req.Context(), "user_id", "user-123"))
 	req.Header.Set("User-Agent", "test-agent")
 	req.Header.Set("X-Request-ID", "req-xyz")
 	req.RemoteAddr = "127.0.0.1:12345"
