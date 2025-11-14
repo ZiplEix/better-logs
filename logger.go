@@ -1,4 +1,4 @@
-package betterauth
+package betterlogs
 
 import (
 	"context"
