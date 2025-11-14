@@ -1,5 +1,7 @@
 # Better Logs
 
+![Tests](https://github.com/ZiplEix/better-logs/actions/workflows/tests.yml/badge.svg)
+
 A lightweight, production‑ready logging toolkit designed for Go services that want **structured logs**, **database persistence**, and **framework‑agnostic HTTP middleware**, without relying on any external SaaS.
 
 This README provides:
