@@ -1,0 +1,70 @@
+name: Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5433:5432
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: better_logs_test
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=3s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.22"
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: "go-${{ runner.OS }}-${{ hashFiles('**/go.sum') }}"
+          restore-keys: |
+            go-${{ runner.OS }}-
+
+      - name: Install Staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Wait for Postgres to be ready
+        run: |
+          until pg_isready -h localhost -p 5433 -U postgres; do
+            echo "Waiting for Postgres..."
+            sleep 2
+          done
+
+      - name: Set TEST_DATABASE_URL
+        run: |
+          echo "TEST_DATABASE_URL=postgres://postgres:password@localhost:5433/better_logs_test?sslmode=disable" >> $GITHUB_ENV
+
+      - name: Run Staticcheck
+        run: staticcheck ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run Tests
+        env:
+          TEST_DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: go test ./... -v -race -count=1
